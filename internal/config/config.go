@@ -11,10 +11,10 @@ import (
 // Config is the root configuration struct.
 // personal_data on disk is stored encrypted as personal_data_encrypted (base64).
 type Config struct {
-	Service      ServiceConfig      `yaml:"service"`
-	Telegram     TelegramConfig     `yaml:"telegram"`
-	PersonalData PersonalData       `yaml:"-"` // populated after decryption; never written to disk
-	WatchList    []WatchEntry       `yaml:"watch_list"`
+	Service      ServiceConfig  `yaml:"service"`
+	Telegram     TelegramConfig `yaml:"telegram"`
+	PersonalData PersonalData   `yaml:"-"` // populated after decryption; never written to disk
+	WatchList    []WatchEntry   `yaml:"watch_list"`
 }
 
 type ServiceConfig struct {
@@ -42,10 +42,10 @@ type WatchEntry struct {
 
 // rawConfig is used for YAML parsing (includes encrypted personal_data field).
 type rawConfig struct {
-	Service                  ServiceConfig `yaml:"service"`
-	Telegram                 TelegramConfig `yaml:"telegram"`
-	PersonalDataEncrypted    string         `yaml:"personal_data_encrypted,omitempty"`
-	WatchList                []WatchEntry   `yaml:"watch_list"`
+	Service               ServiceConfig  `yaml:"service"`
+	Telegram              TelegramConfig `yaml:"telegram"`
+	PersonalDataEncrypted string         `yaml:"personal_data_encrypted,omitempty"`
+	WatchList             []WatchEntry   `yaml:"watch_list"`
 }
 
 // Load reads and decrypts the config file.

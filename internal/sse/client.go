@@ -104,8 +104,7 @@ func (c *Client) connect(ctx context.Context, lastEventID *string) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		switch {
-		case line == "":
+		if line == "" {
 			// Empty line = dispatch event
 			if len(dataLines) > 0 && eventType != "" {
 				rawData := strings.Join(dataLines, "\n")
@@ -122,17 +121,13 @@ func (c *Client) connect(ctx context.Context, lastEventID *string) error {
 			eventType = ""
 			eventID = ""
 			dataLines = dataLines[:0]
-
-		case strings.HasPrefix(line, "event:"):
+		} else if strings.HasPrefix(line, "event:") {
 			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-
-		case strings.HasPrefix(line, "id:"):
+		} else if strings.HasPrefix(line, "id:") {
 			eventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-
-		case strings.HasPrefix(line, "data:"):
+		} else if strings.HasPrefix(line, "data:") {
 			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-
-		case strings.HasPrefix(line, ":"):
+		} else if strings.HasPrefix(line, ":") {
 			// keepalive comment — ignore
 		}
 	}

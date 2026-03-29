@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	saltLen    = 32
-	scryptN    = 32768
-	scryptR    = 8
-	scryptP    = 1
-	keyLen     = 32 // AES-256
+	saltLen = 32
+	scryptN = 32768
+	scryptR = 8
+	scryptP = 1
+	keyLen  = 32 // AES-256
 )
 
 // Encrypt encrypts plaintext with AES-256-GCM using a password-derived key.

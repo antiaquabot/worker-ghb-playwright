@@ -14,7 +14,6 @@ import (
 // Manager manages Chromium lifecycle: installation and access.
 type Manager struct {
 	cachePath string
-	pw        *playwright.Playwright
 }
 
 func NewManager() *Manager {

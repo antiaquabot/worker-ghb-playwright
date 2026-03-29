@@ -14,11 +14,11 @@ import (
 type EventHandler func(eventType, externalID string, data map[string]any)
 
 type registrationStatus struct {
-	DeveloperID        string `json:"developer_id"`
-	ExternalID         string `json:"external_id"`
-	Title              string `json:"title"`
-	RegistrationOpen   bool   `json:"registration_open"`
-	RegistrationURL    string `json:"registration_url"`
+	DeveloperID      string `json:"developer_id"`
+	ExternalID       string `json:"external_id"`
+	Title            string `json:"title"`
+	RegistrationOpen bool   `json:"registration_open"`
+	RegistrationURL  string `json:"registration_url"`
 }
 
 // Client polls the REST endpoint as fallback when SSE is unavailable.
