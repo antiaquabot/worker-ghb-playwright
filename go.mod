@@ -1,10 +1,11 @@
 module github.com/stroi-homes/worker-ghb-playwright
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/playwright-community/playwright-go v0.4702.0
 	golang.org/x/crypto v0.31.0
+	golang.org/x/term v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -15,4 +16,5 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 )
