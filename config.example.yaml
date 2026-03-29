@@ -1,0 +1,27 @@
+# worker-ghb-playwright — пример конфигурации
+# Формат идентичен worker-ghb-http (конфиги совместимы между воркерами).
+# developer_id ("ghb") зашит в бинарь — в конфиге не указывается.
+
+service:
+  base_url: "https://stroi.homes"
+  use_sse: true
+  poll_interval_seconds: 60
+
+telegram:
+  bot_token: "1234567890:AAABBBCCCDDDEEEFFFGGG..."
+  chat_id: "987654321"
+
+# Секция шифруется при инициализации. Хранится как personal_data_encrypted.
+# Используйте `worker-ghb-playwright init` для первичной настройки.
+personal_data:
+  full_name: "Иванов Иван Иванович"
+  phone: "+79001234567"
+  birth_date: "1990-01-15"
+
+watch_list:
+  - object_external_id: "obj-123"
+    notify_on_open: true
+    auto_register: true
+  - object_external_id: "*"
+    notify_on_open: true
+    auto_register: false
