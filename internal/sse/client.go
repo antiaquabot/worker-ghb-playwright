@@ -127,8 +127,6 @@ func (c *Client) connect(ctx context.Context, lastEventID *string) error {
 			eventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 		} else if strings.HasPrefix(line, "data:") {
 			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		} else if strings.HasPrefix(line, ":") {
-			// keepalive comment — ignore
 		}
 	}
 
