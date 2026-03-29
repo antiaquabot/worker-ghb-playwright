@@ -32,8 +32,7 @@ func (m *Manager) EnsureInstalled(ctx context.Context) error {
 	log.Printf("Проверка Chromium в кэше: %s", m.cachePath)
 
 	runOptions := &playwright.RunOptions{
-		DriverDirectory:  m.cachePath,
-		BrowsersPath:     m.cachePath,
+		DriverDirectory:     m.cachePath,
 		SkipInstallBrowsers: false,
 	}
 
@@ -56,8 +55,7 @@ func (m *Manager) ForceUpdate(ctx context.Context) error {
 // Launch starts a new headless Chromium browser instance.
 func (m *Manager) Launch() (*playwright.Playwright, playwright.Browser, error) {
 	pw, err := playwright.Run(&playwright.RunOptions{
-		DriverDirectory:  m.cachePath,
-		BrowsersPath:     m.cachePath,
+		DriverDirectory:     m.cachePath,
 		SkipInstallBrowsers: true,
 	})
 	if err != nil {
