@@ -1,6 +1,7 @@
 # worker-ghb-playwright
 
-Воркер для автоматического уведомления и регистрации на объекты застройщика **GHB** через браузерную автоматизацию (Playwright / Chromium headless).
+Воркер для автоматического уведомления и регистрации на объекты застройщика **GHB** через браузерную автоматизацию (
+Playwright / Chromium headless).
 
 **Застройщик:** GHB (зашит в бинарь)
 **Лицензия:** MIT
@@ -21,7 +22,8 @@ chmod +x worker-ghb-playwright
 
 ### Windows
 
-Скачать `worker-ghb-playwright-windows-amd64.exe` со страницы [Releases](../../releases) и запустить. Chromium скачается автоматически при первом запуске в `%APPDATA%\worker-ghb-playwright\chromium\`.
+Скачать `worker-ghb-playwright-windows-amd64.exe` со страницы [Releases](../../releases) и запустить. Chromium скачается
+автоматически при первом запуске в `%APPDATA%\worker-ghb-playwright\chromium\`.
 
 ---
 
@@ -38,6 +40,7 @@ Chromium готов к использованию
 Последующие запуски используют кэш без загрузки.
 
 **Принудительное обновление Chromium:**
+
 ```bash
 ./worker-ghb-playwright --update-browser
 ```
@@ -56,17 +59,17 @@ Chromium готов к использованию
 
 ### Структура конфига
 
-| Параметр | Описание |
-|----------|-----------|
-| `service.base_url` | URL сервера (обычно `https://stroi.homes`) |
-| `service.use_sse` | Использовать Server-Sent Events вместо polling |
+| Параметр                        | Описание                                           |
+|---------------------------------|----------------------------------------------------|
+| `service.base_url`              | URL сервера (обычно `https://stroi.homes`)         |
+| `service.use_sse`               | Использовать Server-Sent Events вместо polling     |
 | `service.poll_interval_seconds` | Интервал опроса в секундах (если `use_sse: false`) |
-| `telegram.enabled` | Включить уведомления в Telegram |
-| `telegram.bot_token` | Токен Telegram-бота (получить у @BotFather) |
-| `telegram.chat_id` | ID чата для уведомлений |
-| `personal_data.full_name` | ФИО (шифруется) |
-| `personal_data.phone` | Номер телефона (шифруется) |
-| `watch_list` | Список объектов для отслеживания |
+| `telegram.enabled`              | Включить уведомления в Telegram                    |
+| `telegram.bot_token`            | Токен Telegram-бота (получить у @BotFather)        |
+| `telegram.chat_id`              | ID чата для уведомлений                            |
+| `personal_data.full_name`       | ФИО (шифруется)                                    |
+| `personal_data.phone`           | Номер телефона (шифруется)                         |
+| `watch_list`                    | Список объектов для отслеживания                   |
 
 ### Как получить chat_id
 
@@ -74,17 +77,30 @@ Chromium готов к использованию
 2. Добавьте бота в чат (группу или канал)
 3. Отправьте любое сообщение в чат
 4. Перейдите по ссылке: `https://api.telegram.org/bot<TOKEN>/getUpdates`
-   - Замените `<TOKEN>` на токен вашего бота
+    - Замените `<TOKEN>` на токен вашего бота
 5. В ответе найдите поле `chat.id` — это и есть `chat_id` (отрицательное число для групп)
 
 **Для личных сообщений:**
+
 1. Начните чат с вашим ботом (@username бота)
 2. Откройте `https://api.telegram.org/bot<TOKEN>/getUpdates`
 3. Найдите поле `chat.id` в секции `from` — это ваш личный `chat_id`
 
 Пример ответа:
+
 ```json
-{"ok":true,"result":[{"update_id":123456789,"message":{"chat":{"id":-987654321,"title":"My Group"}}}
+{
+  "ok": true,
+  "result": [
+    {
+      "update_id": 123456789,
+      "message": {
+        "chat": {
+          "id": -987654321,
+          "title": "My Group"
+        }
+      }
+    }
 ```
 
 ---
@@ -104,6 +120,7 @@ WORKER_PASSWORD=мой_пароль ./worker-ghb-playwright --config config.yaml
 ## Скриншоты при ошибках
 
 При ошибке во время авторегистрации сохраняется скриншот:
+
 - Linux/macOS: `~/.worker-ghb-playwright/screenshots/`
 - Windows: `%APPDATA%\worker-ghb-playwright\screenshots\`
 
