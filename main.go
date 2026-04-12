@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/stroi-homes/worker-ghb-playwright/internal/browser"
 	"github.com/stroi-homes/worker-ghb-playwright/internal/config"
@@ -99,14 +100,36 @@ func main() {
 	wl := watchlist.New(cfg.WatchList)
 	reg := scenario.NewGHBScenario(bm)
 
+	// minskLoc is UTC+3 (Europe/Minsk) — matches the Python worker's ZoneInfo("Europe/Minsk").
+	minskLoc := time.FixedZone("Europe/Minsk", 3*60*60)
+
+	// smsDeadlineStr formats the context deadline the same way as Python:
+	// "[DD.MM.YYYY HH:MM:SS:cc]" where cc is hundredths of a second.
+	smsDeadlineStr := func(ctx context.Context) string {
+		dl, ok := ctx.Deadline()
+		if !ok {
+			return ""
+		}
+		dl = dl.In(minskLoc)
+		cc := dl.Nanosecond() / 10_000_000
+		return fmt.Sprintf("[%s:%02d]", dl.Format("02.01.2006 15:04:05"), cc)
+	}
+
 	var smsCodeFn func(innerCtx context.Context) (string, error)
 	if tgEnabled {
 		smsCodeFn = func(innerCtx context.Context) (string, error) {
-			msgID, err := tg.SendWithMessageID(innerCtx, "📲 Введите SMS-код, полученный от GHB, и отправьте его мне в ответ на это сообщение.")
+			dl := smsDeadlineStr(innerCtx)
+			msg := fmt.Sprintf(
+				"📩 На ваш номер телефона отправлен код подтверждения.\n"+
+					"Введите код из SMS до %s — иначе регистрация завершится с ошибкой.\n\n"+
+					"Отправьте код ответным сообщением.",
+				dl,
+			)
+			msgID, err := tg.SendWithMessageID(innerCtx, msg)
 			if err != nil {
 				log.Printf("telegram send error: %v", err)
 				log.Printf("[sms-code] falling back to stdin...")
-				fmt.Print("Введите SMS-код: ")
+				fmt.Printf("Введите SMS-код до %s: ", dl)
 				var code string
 				if _, err := fmt.Scanln(&code); err != nil {
 					return "", fmt.Errorf("read SMS code: %w", err)
@@ -117,7 +140,7 @@ func main() {
 			code, err := tg.WaitForCode(innerCtx, msgID)
 			if err != nil {
 				log.Printf("[sms-code] telegram wait error: %v, falling back to stdin", err)
-				fmt.Print("Введите SMS-код: ")
+				fmt.Printf("Введите SMS-код до %s: ", dl)
 				var code string
 				if _, err := fmt.Scanln(&code); err != nil {
 					return "", fmt.Errorf("read SMS code: %w", err)
@@ -128,7 +151,7 @@ func main() {
 		}
 	} else {
 		smsCodeFn = func(innerCtx context.Context) (string, error) {
-			fmt.Print("Введите SMS-код: ")
+			fmt.Printf("Введите SMS-код до %s: ", smsDeadlineStr(innerCtx))
 			var code string
 			if _, err := fmt.Scanln(&code); err != nil {
 				return "", fmt.Errorf("read SMS code: %w", err)

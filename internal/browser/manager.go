@@ -63,6 +63,11 @@ func (m *Manager) Launch() (*playwright.Playwright, playwright.Browser, error) {
 
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(true),
+		Args: []string{
+			"--no-sandbox",
+			"--disable-dev-shm-usage",
+			"--ignore-certificate-errors",
+		},
 	})
 	if err != nil {
 		_ = pw.Stop()

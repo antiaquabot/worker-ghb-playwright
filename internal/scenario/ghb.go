@@ -14,17 +14,21 @@ import (
 	"github.com/stroi-homes/worker-ghb-playwright/internal/config"
 )
 
+// Timeouts mirror Python worker constants.
 const (
-	regBaseURL     = "https://reg.ghb.by"
-	navTimeout     = 30 * time.Second
-	smsWaitTimeout = 3 * time.Minute
+	navTimeout     = 30 * time.Second // REGISTER_VIA_PLAYWRIGHT_TIMEOUT_MS
+	smsWaitTimeout = 3 * time.Minute  // SMS_CODE_WAIT_TIMEOUT_MS
+	errorWaitDelay = 1 * time.Second  // ERROR_WAIT_TIMEOUT_MS
+	retryDelay     = 2 * time.Second  // RETRY_INTERVAL_MS
+	retryMaxTime   = 60 * time.Second // RETRY_TIMEOUT_MS
+	tempErrorText  = "Попробуйте позже"
 )
 
 // Scenario performs browser-based auto-registration on a developer's website.
 type Scenario interface {
 	// Execute runs the registration scenario for objectID.
 	// smsCodeFn is called when the browser is on the SMS confirmation step —
-	// it should block until the user provides the 6-digit code.
+	// it should block until the user provides the code.
 	Execute(ctx context.Context, objectID string, regURL string, personalData config.PersonalData, smsCodeFn SMSCodeFunc) error
 }
 
@@ -33,13 +37,15 @@ type SMSCodeFunc func(ctx context.Context) (string, error)
 
 // GHBScenario implements Scenario for GHB via Playwright/Chromium.
 //
-// Registration flow mirrors the HTTP flow but uses a real browser:
-//  1. Navigate to https://reg.ghb.by/register/?id=<objectID>
-//  2. Fill in the registration form (last name, first name, patronymic, phone, consent)
-//  3. Submit → server sends SMS
-//  4. Wait for SMS code (via smsCodeFn callback)
-//  5. Fill in SMS code and submit confirmation form
-//  6. Verify success message
+// Registration flow mirrors Python's auto_registration_ui_worker._fill_and_submit_form:
+//  1. Navigate (domcontentloaded)
+//  2. Pre-form error check via .megaalerts
+//  3. Wait for submit button, fill form with ID-selectors (#lastname, #firstname …)
+//  4. Submit with retry on temporary "Попробуйте позже" server error
+//  5. Wait for #sms_code to become visible (or detect immediate success)
+//  6. Collect SMS code from user (Telegram reply or stdin)
+//  7. Fill #sms_code, submit confirmation with the same retry logic
+//  8. Final megaalerts check — no alert means success
 type GHBScenario struct {
 	manager *browser.Manager
 }
@@ -65,12 +71,21 @@ func (s *GHBScenario) Execute(
 		_ = pw.Stop()
 	}()
 
-	page, err := br.NewPage()
+	// Browser context with HTTPS errors ignored — mirrors Python: ignore_https_errors=True.
+	bctx, err := br.NewContext(playwright.BrowserNewContextOptions{
+		IgnoreHttpsErrors: playwright.Bool(true),
+	})
+	if err != nil {
+		return fmt.Errorf("new browser context: %w", err)
+	}
+	defer bctx.Close()
+
+	page, err := bctx.NewPage()
 	if err != nil {
 		return fmt.Errorf("new page: %w", err)
 	}
 
-	// Screenshot on any error for debugging (FR-WORKER-PW-002)
+	// Screenshot on any error for debugging.
 	var execErr error
 	defer func() {
 		if execErr != nil {
@@ -93,25 +108,32 @@ func (s *GHBScenario) runScenario(
 	toMs := float64(navTimeout.Milliseconds())
 
 	// -----------------------------------------------------------------------
-	// Step 1: Navigate to registration page
+	// Step 1: Navigate — domcontentloaded mirrors Python's wait_until="domcontentloaded".
 	// -----------------------------------------------------------------------
 	log.Printf("[ghb-scenario] step 1: navigate to %s", regURL)
 	if _, err := page.Goto(regURL, playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateNetworkidle,
+		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   playwright.Float(toMs),
 	}); err != nil {
 		return fmt.Errorf("step 1 navigate: %w", err)
 	}
 
-	// Check if already registered
-	content, _ := page.Content()
-	if isAlreadyRegistered(content) {
-		return fmt.Errorf("already registered for object %s", objectID)
+	// Pre-form megaalerts check (e.g. "already registered", service unavailable).
+	if txt, hasErr := s.megaalertText(page); hasErr {
+		return fmt.Errorf("step 1: server error: %s", txt)
 	}
 
 	// -----------------------------------------------------------------------
-	// Step 2: Fill registration form
+	// Step 2: Wait for form, fill fields.
+	// ID-selectors (#lastname …) mirror Python's page.fill("#lastname", …).
 	// -----------------------------------------------------------------------
+	log.Printf("[ghb-scenario] step 2: waiting for submit button")
+	if _, err := page.WaitForSelector(`form button[type=submit]`, playwright.PageWaitForSelectorOptions{
+		Timeout: playwright.Float(toMs),
+	}); err != nil {
+		return fmt.Errorf("step 2: submit button not found: %w", err)
+	}
+
 	last, first, middle := pd.Parts()
 	if last == "" || first == "" {
 		return fmt.Errorf("personal_data: last_name and first_name are required")
@@ -122,79 +144,63 @@ func (s *GHBScenario) runScenario(
 	}
 
 	log.Printf("[ghb-scenario] step 2: filling registration form")
-	if err := page.Fill(`input[name="lastname"]`, last); err != nil {
+	if err := page.Fill(`#lastname`, last); err != nil {
 		return fmt.Errorf("fill lastname: %w", err)
 	}
-	if err := page.Fill(`input[name="firstname"]`, first); err != nil {
+	if err := page.Fill(`#firstname`, first); err != nil {
 		return fmt.Errorf("fill firstname: %w", err)
 	}
-	if err := page.Fill(`input[name="middlename"]`, middle); err != nil {
-		// middlename may be optional — log and continue
-		log.Printf("[ghb-scenario] warn: middlename field not found or fill failed: %v", err)
+	if middle != "" {
+		if err := page.Fill(`#middlename`, middle); err != nil {
+			log.Printf("[ghb-scenario] warn: middlename field: %v", err)
+		}
 	}
-	if err := page.Fill(`input[name="phone"]`, phone); err != nil {
+	if err := page.Fill(`#phone`, phone); err != nil {
 		return fmt.Errorf("fill phone: %w", err)
 	}
 
-	// Tick consent checkbox if not already checked
-	checked, _ := page.IsChecked(`input[name="consent"]`)
-	if !checked {
-		if err := page.Check(`input[name="consent"]`); err != nil {
-			log.Printf("[ghb-scenario] warn: consent checkbox: %v", err)
+	consent := page.Locator(`#consent`)
+	if n, _ := consent.Count(); n > 0 {
+		if checked, _ := consent.IsChecked(); !checked {
+			if err := consent.Check(); err != nil {
+				log.Printf("[ghb-scenario] warn: consent checkbox: %v", err)
+			}
 		}
 	}
 
 	// -----------------------------------------------------------------------
-	// Step 3: Submit form (act=reg_user)
+	// Step 3: Submit form with retry on temporary server errors.
+	// Mirrors Python's retry loop around page.click("form button[type=submit]").
 	// -----------------------------------------------------------------------
 	log.Printf("[ghb-scenario] step 3: submitting registration form")
+	s.submitWithRetry(page, toMs)
 
-	// Click the submit button; fall back to form submission
-	submitErr := page.Click(`button[type="submit"], input[type="submit"]`)
-	if submitErr != nil {
-		// Try form.submit() via JS
-		if _, jsErr := page.Evaluate(`
-			var form = document.querySelector('form');
-			if (form) {
-				var act = document.querySelector('input[name="act"]');
-				if (!act) {
-					act = document.createElement('input');
-					act.type = 'hidden';
-					act.name = 'act';
-					form.appendChild(act);
-				}
-				act.value = 'reg_user';
-				form.submit();
-			}
-		`); jsErr != nil {
-			return fmt.Errorf("submit form: button click failed (%v), JS fallback failed (%v)", submitErr, jsErr)
-		}
+	if txt, hasErr := s.megaalertText(page); hasErr {
+		return fmt.Errorf("step 3: %s", txt)
 	}
-
-	// Wait for page to load (SMS form or success page)
-	if err := page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State:   playwright.LoadStateNetworkidle,
-		Timeout: playwright.Float(toMs),
-	}); err != nil {
-		log.Printf("[ghb-scenario] warn: wait after submit: %v", err)
-	}
-
-	// Check for immediate success (rare)
-	content2, _ := page.Content()
-	if isSuccess(content2) {
-		log.Printf("[ghb-scenario] registration completed without SMS step")
-		return nil
-	}
-	if isAlreadyRegistered(content2) {
-		return fmt.Errorf("already registered for object %s", objectID)
-	}
-	if !hasSMSForm(content2) {
-		return fmt.Errorf("step 3: SMS code form not found after form submission")
-	}
-	log.Printf("[ghb-scenario] step 3 OK — SMS form confirmed, waiting for code")
 
 	// -----------------------------------------------------------------------
-	// Step 4: Wait for SMS code
+	// Step 4: Wait for #sms_code to become visible or detect immediate success.
+	// Mirrors Python: sms_input_locator.wait_for(state="visible", timeout=…).
+	// -----------------------------------------------------------------------
+	smsLocator := page.Locator(`#sms_code`)
+	smsFormPresent := smsLocator.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: playwright.Float(toMs),
+	}) == nil
+	log.Printf("[ghb-scenario] SMS form present: %v", smsFormPresent)
+
+	if !smsFormPresent {
+		_, hasAlert := s.megaalertText(page)
+		if s.hasSuccessHeading(page) && !hasAlert {
+			log.Printf("[ghb-scenario] registration completed without SMS step for %s", objectID)
+			return nil
+		}
+		return fmt.Errorf("step 4: registration outcome unclear — check %s manually", regURL)
+	}
+
+	// -----------------------------------------------------------------------
+	// Step 5: Collect SMS code from user (Telegram reply or stdin).
 	// -----------------------------------------------------------------------
 	smsCtx, smsCancel := context.WithTimeout(ctx, smsWaitTimeout)
 	defer smsCancel()
@@ -210,53 +216,78 @@ func (s *GHBScenario) runScenario(
 	log.Printf("[ghb-scenario] SMS code received, entering confirmation")
 
 	// -----------------------------------------------------------------------
-	// Step 5: Fill SMS code and submit
+	// Step 6: Fill SMS code and submit confirmation with the same retry logic.
 	// -----------------------------------------------------------------------
-	if err := page.Fill(`input[name="sms_code"]`, code); err != nil {
+	if err := page.Fill(`#sms_code`, code); err != nil {
 		return fmt.Errorf("fill sms_code: %w", err)
 	}
 
-	// Click confirm button
-	confSubmitErr := page.Click(`button[type="submit"], input[type="submit"]`)
-	if confSubmitErr != nil {
-		if _, jsErr := page.Evaluate(`
-			var form = document.querySelector('form');
-			if (form) {
-				var act = document.querySelector('input[name="act"]');
-				if (!act) {
-					act = document.createElement('input');
-					act.type = 'hidden';
-					act.name = 'act';
-					form.appendChild(act);
-				}
-				act.value = 'conf_user';
-				form.submit();
-			}
-		`); jsErr != nil {
-			return fmt.Errorf("submit confirmation: %v; JS fallback: %v", confSubmitErr, jsErr)
+	log.Printf("[ghb-scenario] step 6: submitting SMS confirmation")
+	s.submitWithRetry(page, toMs)
+
+	if txt, hasErr := s.megaalertText(page); hasErr {
+		return fmt.Errorf("step 6: SMS confirmation error: %s", txt)
+	}
+
+	log.Printf("[ghb-scenario] registration completed successfully for object %s", objectID)
+	return nil
+}
+
+// submitWithRetry clicks the form submit button and retries while the server
+// returns a temporary "Попробуйте позже" error.
+// Mirrors Python's retry loop in _fill_and_submit_form.
+func (s *GHBScenario) submitWithRetry(page playwright.Page, toMs float64) {
+	deadline := time.Now().Add(retryMaxTime)
+	for {
+		log.Printf("[ghb-scenario] clicking submit button")
+		if err := page.Click(`form button[type=submit]`); err != nil {
+			log.Printf("[ghb-scenario] click submit (non-fatal): %v", err)
 		}
-	}
 
-	if err := page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State:   playwright.LoadStateNetworkidle,
-		Timeout: playwright.Float(toMs),
-	}); err != nil {
-		log.Printf("[ghb-scenario] warn: wait after confirmation: %v", err)
-	}
+		// Wait for page to settle after navigation (or stay on page if validation blocked).
+		// Non-fatal: if no navigation happened the page is already in domcontentloaded.
+		if err := page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+			State:   playwright.LoadStateDomcontentloaded,
+			Timeout: playwright.Float(toMs),
+		}); err != nil {
+			log.Printf("[ghb-scenario] wait after submit (non-fatal): %v", err)
+		}
 
-	// -----------------------------------------------------------------------
-	// Step 6: Verify success
-	// -----------------------------------------------------------------------
-	finalContent, _ := page.Content()
-	if isSuccess(finalContent) {
-		log.Printf("[ghb-scenario] registration completed successfully for object %s", objectID)
-		return nil
-	}
-	if strings.Contains(strings.ToLower(finalContent), "неверн") {
-		return fmt.Errorf("step 5: SMS code is incorrect")
-	}
+		// Brief pause for server-rendered error messages — mirrors ERROR_WAIT_TIMEOUT_MS.
+		time.Sleep(errorWaitDelay)
 
-	return fmt.Errorf("step 5: registration outcome unclear — check %s manually", regURL)
+		txt, hasErr := s.megaalertText(page)
+		if hasErr && strings.Contains(txt, tempErrorText) && time.Now().Before(deadline) {
+			log.Printf("[ghb-scenario] temporary server error %q — retrying in %s", txt, retryDelay)
+			time.Sleep(retryDelay)
+			continue
+		}
+		break
+	}
+}
+
+// megaalertText reads the first .megaalerts .megaalert-content element.
+// Returns (text, true) when an alert is present, ("", false) otherwise.
+// Mirrors Python: err_locator = page.locator(".megaalerts .megaalert-content").
+func (s *GHBScenario) megaalertText(page playwright.Page) (string, bool) {
+	loc := page.Locator(`.megaalerts .megaalert-content`)
+	n, _ := loc.Count()
+	if n == 0 {
+		return "", false
+	}
+	txt, _ := loc.First().InnerText()
+	return strings.TrimSpace(txt), true
+}
+
+// hasSuccessHeading returns true when the page contains "Регистрация завершена"
+// in a heading or paragraph.
+// Mirrors Python: page.locator("h1, h2, h3, p").filter(has_text="Регистрация завершена").
+func (s *GHBScenario) hasSuccessHeading(page playwright.Page) bool {
+	loc := page.Locator(`h1, h2, h3, p`).Filter(playwright.LocatorFilterOptions{
+		HasText: "Регистрация завершена",
+	})
+	n, _ := loc.Count()
+	return n > 0
 }
 
 // ---------------------------------------------------------------------------
@@ -279,28 +310,4 @@ func (s *GHBScenario) saveScreenshot(page playwright.Page, objectID string) {
 		return
 	}
 	log.Printf("debug screenshot saved: %s", path)
-}
-
-// ---------------------------------------------------------------------------
-// HTML detection helpers (same logic as HTTP registrar)
-// ---------------------------------------------------------------------------
-
-func hasSMSForm(body string) bool {
-	lower := strings.ToLower(body)
-	return strings.Contains(lower, "sms_code") ||
-		strings.Contains(lower, "смс-код") ||
-		strings.Contains(lower, "введите код")
-}
-
-func isSuccess(body string) bool {
-	lower := strings.ToLower(body)
-	return strings.Contains(lower, "регистрация завершена") ||
-		strings.Contains(lower, "зарегистрированы") ||
-		strings.Contains(lower, "успешно зарегистрирован")
-}
-
-func isAlreadyRegistered(body string) bool {
-	lower := strings.ToLower(body)
-	return strings.Contains(lower, "уже зарегистрирован") ||
-		strings.Contains(lower, "already registered")
 }
