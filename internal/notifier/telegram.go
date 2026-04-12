@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -58,6 +60,50 @@ func (n *Notifier) Send(ctx context.Context, text string) error {
 	return nil
 }
 
+// SendWithMessageID sends a text message and returns the message ID.
+func (n *Notifier) SendWithMessageID(ctx context.Context, text string) (int, error) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.botToken)
+
+	payload := map[string]any{
+		"chat_id":    n.chatID,
+		"text":       text,
+		"parse_mode": "HTML",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("send: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("telegram error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			MessageID int `json:"message_id"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode: %w", err)
+	}
+
+	return result.Result.MessageID, nil
+}
+
 // FormatRegistrationOpened formats the REGISTRATION_OPENED notification message.
 func (n *Notifier) FormatRegistrationOpened(externalID string, data map[string]any) string {
 	title, _ := data["title"].(string)
@@ -99,4 +145,88 @@ func (n *Notifier) FormatRegistrationSuccess(externalID string) string {
 func (n *Notifier) FormatRegistrationError(externalID string, err error) string {
 	return fmt.Sprintf("❌ <b>Ошибка регистрации</b>\n\n📦 Объект: %s\n⚠️ %v\n🕐 %s",
 		externalID, err, time.Now().Format("02.01.2006 15:04:05"))
+}
+
+type Update struct {
+	ID      int `json:"update_id"`
+	Message struct {
+		Text           string `json:"text"`
+		MessageID      int    `json:"message_id"`
+		ReplyToMessage struct {
+			MessageID int `json:"message_id"`
+		} `json:"reply_to_message,omitempty"`
+		From struct {
+			ID int `json:"id"`
+		} `json:"from"`
+	} `json:"message"`
+}
+
+func (n *Notifier) GetUpdates(ctx context.Context, offset int) ([]Update, error) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", n.botToken)
+
+	payload := map[string]any{
+		"offset":  offset,
+		"timeout": 10,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("telegram error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		OK     bool     `json:"ok"`
+		Result []Update `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+
+	return result.Result, nil
+}
+
+func (n *Notifier) WaitForCode(ctx context.Context, messageID int) (string, error) {
+	offset := 0
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ticker.C:
+			updates, err := n.GetUpdates(ctx, offset)
+			if err != nil {
+				log.Printf("[telegram] getUpdates error: %v", err)
+				continue
+			}
+			for _, u := range updates {
+				offset = u.ID + 1
+				if u.Message.ReplyToMessage.MessageID == messageID {
+					log.Printf("[telegram] received reply to message %d: %s", messageID, u.Message.Text)
+					return strings.TrimSpace(u.Message.Text), nil
+				}
+				if u.Message.MessageID > messageID && u.Message.Text != "" {
+					log.Printf("[telegram] received message after %d (no reply): %s", messageID, u.Message.Text)
+					return strings.TrimSpace(u.Message.Text), nil
+				}
+			}
+		}
+	}
 }

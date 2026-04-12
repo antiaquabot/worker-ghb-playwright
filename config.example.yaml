@@ -8,6 +8,7 @@ service:
   poll_interval_seconds: 60
 
 telegram:
+  enabled: true
   bot_token: "1234567890:AAABBBCCCDDDEEEFFFGGG..."
   chat_id: "987654321"
 
@@ -16,7 +17,6 @@ telegram:
 personal_data:
   full_name: "Иванов Иван Иванович"
   phone: "+79001234567"
-  birth_date: "1990-01-15"
 
 watch_list:
   - object_external_id: "obj-123"

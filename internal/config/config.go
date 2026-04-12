@@ -28,6 +28,7 @@ type ServiceConfig struct {
 }
 
 type TelegramConfig struct {
+	Enabled  bool   `yaml:"enabled"`
 	BotToken string `yaml:"bot_token"`
 	ChatID   string `yaml:"chat_id"`
 }
@@ -46,8 +47,6 @@ type PersonalData struct {
 	// Phone in any format — the registrar strips non-digits and takes last 9.
 	// E.g. "+375 29 284 40 73" → "292844073"
 	Phone string `yaml:"phone"`
-
-	BirthDate string `yaml:"birth_date,omitempty"`
 }
 
 // Parts returns (lastName, firstName, middleName), splitting FullName if needed.
@@ -167,9 +166,14 @@ func InitConfig(path string) error {
 	}
 
 	// Collect telegram config
-	tg := TelegramConfig{
-		BotToken: prompt("Telegram bot token: ", ""),
-		ChatID:   prompt("Telegram chat_id: ", ""),
+	tgEnabled := promptBool("Включить интеграцию с Telegram? [Y/n]: ", true)
+	var tg TelegramConfig
+	if tgEnabled {
+		tg = TelegramConfig{
+			Enabled:  true,
+			BotToken: prompt("Telegram bot token: ", ""),
+			ChatID:   prompt("Telegram chat_id: ", ""),
+		}
 	}
 
 	// Collect watch list
@@ -207,9 +211,8 @@ func InitConfig(path string) error {
 		fmt.Println("Заполните персональные данные для авторегистрации.")
 		fmt.Println("Они будут зашифрованы AES-256-GCM.")
 		pd := PersonalData{
-			FullName:  prompt("  ФИО (полностью): ", ""),
-			Phone:     prompt("  Телефон (+375...): ", ""),
-			BirthDate: prompt("  Дата рождения (ГГГГ-ММ-ДД): ", ""),
+			FullName: prompt("  ФИО (полностью): ", ""),
+			Phone:    prompt("  Телефон (+375...): ", ""),
 		}
 		pdYAML, err := yaml.Marshal(pd)
 		if err != nil {
@@ -354,7 +357,7 @@ func EditConfig(path string) error {
 	// Re-encrypt personal_data
 	var newEncryptedPD string
 	// Check if personal_data has any non-empty fields
-	if edited.PersonalData.FullName != "" || edited.PersonalData.Phone != "" || edited.PersonalData.BirthDate != "" {
+	if edited.PersonalData.FullName != "" || edited.PersonalData.Phone != "" {
 		if password == "" {
 			pw, err := promptPassword("Введите пароль для шифрования personal_data: ")
 			if err != nil {

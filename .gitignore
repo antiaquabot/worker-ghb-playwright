@@ -1,0 +1,14 @@
+# Build output
+worker-ghb-playwright
+worker-ghb-playwright.exe
+dist/
+
+# Real config (example is tracked, real is not)
+config.yaml
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

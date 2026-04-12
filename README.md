@@ -46,11 +46,46 @@ Chromium готов к использованию
 
 ## Настройка
 
+### Инициализация
+
 ```bash
 ./worker-ghb-playwright init --config config.yaml
 ```
 
 Конфиг идентичен `worker-ghb-http` (файлы взаимозаменяемы). Секция `personal_data` шифруется AES-256-GCM.
+
+### Структура конфига
+
+| Параметр | Описание |
+|----------|-----------|
+| `service.base_url` | URL сервера (обычно `https://stroi.homes`) |
+| `service.use_sse` | Использовать Server-Sent Events вместо polling |
+| `service.poll_interval_seconds` | Интервал опроса в секундах (если `use_sse: false`) |
+| `telegram.enabled` | Включить уведомления в Telegram |
+| `telegram.bot_token` | Токен Telegram-бота (получить у @BotFather) |
+| `telegram.chat_id` | ID чата для уведомлений |
+| `personal_data.full_name` | ФИО (шифруется) |
+| `personal_data.phone` | Номер телефона (шифруется) |
+| `watch_list` | Список объектов для отслеживания |
+
+### Как получить chat_id
+
+1. Создайте бота у [@BotFather](https://t.me/BotFather) и получите токен
+2. Добавьте бота в чат (группу или канал)
+3. Отправьте любое сообщение в чат
+4. Перейдите по ссылке: `https://api.telegram.org/bot<TOKEN>/getUpdates`
+   - Замените `<TOKEN>` на токен вашего бота
+5. В ответе найдите поле `chat.id` — это и есть `chat_id` (отрицательное число для групп)
+
+**Для личных сообщений:**
+1. Начните чат с вашим ботом (@username бота)
+2. Откройте `https://api.telegram.org/bot<TOKEN>/getUpdates`
+3. Найдите поле `chat.id` в секции `from` — это ваш личный `chat_id`
+
+Пример ответа:
+```json
+{"ok":true,"result":[{"update_id":123456789,"message":{"chat":{"id":-987654321,"title":"My Group"}}}
+```
 
 ---
 

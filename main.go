@@ -90,44 +90,84 @@ func main() {
 
 	log.Printf("worker-ghb-playwright %s started (developer_id=%s)", Version, DeveloperID)
 
-	tg := notifier.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+	tgEnabled := cfg.Telegram.Enabled && cfg.Telegram.BotToken != "" && cfg.Telegram.ChatID != ""
+	var tg *notifier.Notifier
+	if tgEnabled {
+		tg = notifier.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+	}
+
 	wl := watchlist.New(cfg.WatchList)
 	reg := scenario.NewGHBScenario(bm)
 
-	// smsCodeFn: ask user for SMS code via Telegram, fall back to stdin.
-	smsCodeFn := func(innerCtx context.Context) (string, error) {
-		if err := tg.Send(innerCtx, "📲 Введите SMS-код, полученный от GHB, и отправьте его мне в ответ на это сообщение."); err != nil {
-			log.Printf("telegram send error: %v", err)
+	var smsCodeFn func(innerCtx context.Context) (string, error)
+	if tgEnabled {
+		smsCodeFn = func(innerCtx context.Context) (string, error) {
+			msgID, err := tg.SendWithMessageID(innerCtx, "📲 Введите SMS-код, полученный от GHB, и отправьте его мне в ответ на это сообщение.")
+			if err != nil {
+				log.Printf("telegram send error: %v", err)
+				log.Printf("[sms-code] falling back to stdin...")
+				fmt.Print("Введите SMS-код: ")
+				var code string
+				if _, err := fmt.Scanln(&code); err != nil {
+					return "", fmt.Errorf("read SMS code: %w", err)
+				}
+				return code, nil
+			}
+			log.Printf("[sms-code] waiting for SMS code via Telegram (reply to message %d)...", msgID)
+			code, err := tg.WaitForCode(innerCtx, msgID)
+			if err != nil {
+				log.Printf("[sms-code] telegram wait error: %v, falling back to stdin", err)
+				fmt.Print("Введите SMS-код: ")
+				var code string
+				if _, err := fmt.Scanln(&code); err != nil {
+					return "", fmt.Errorf("read SMS code: %w", err)
+				}
+				return code, nil
+			}
+			return code, nil
 		}
-		log.Printf("[sms-code] waiting for SMS code on stdin...")
-		fmt.Print("Введите SMS-код: ")
-		var code string
-		if _, err := fmt.Scanln(&code); err != nil {
-			return "", fmt.Errorf("read SMS code: %w", err)
+	} else {
+		smsCodeFn = func(innerCtx context.Context) (string, error) {
+			fmt.Print("Введите SMS-код: ")
+			var code string
+			if _, err := fmt.Scanln(&code); err != nil {
+				return "", fmt.Errorf("read SMS code: %w", err)
+			}
+			return code, nil
 		}
-		return code, nil
 	}
 
 	handler := func(eventType, externalID string, data map[string]any) {
 		if eventType != "REGISTRATION_OPENED" {
 			return
 		}
+		log.Printf("[event] %s: %s", eventType, externalID)
+
+		regURL, _ := data["registration_url"].(string)
 		entries := wl.Match(externalID)
 		for _, entry := range entries {
 			if entry.NotifyOnOpen {
-				msg := tg.FormatRegistrationOpened(externalID, data)
-				if err := tg.Send(ctx, msg); err != nil {
-					log.Printf("telegram send error: %v", err)
+				if tgEnabled {
+					msg := tg.FormatRegistrationOpened(externalID, data)
+					if err := tg.Send(ctx, msg); err != nil {
+						log.Printf("telegram send error: %v", err)
+					}
+				} else {
+					log.Printf("[notify] Регистрация открыта: %s", externalID)
 				}
 			}
 			if entry.AutoRegister {
 				go func(eid string) {
 					log.Printf("launching browser registration for object %s", eid)
-					if err := reg.Execute(ctx, eid, cfg.PersonalData, smsCodeFn); err != nil {
+					if err := reg.Execute(ctx, eid, regURL, cfg.PersonalData, smsCodeFn); err != nil {
 						log.Printf("registration failed for %s: %v", eid, err)
-						_ = tg.Send(ctx, tg.FormatRegistrationError(eid, err))
+						if tgEnabled {
+							_ = tg.Send(ctx, tg.FormatRegistrationError(eid, err))
+						}
 					} else {
-						_ = tg.Send(ctx, tg.FormatRegistrationSuccess(eid))
+						if tgEnabled {
+							_ = tg.Send(ctx, tg.FormatRegistrationSuccess(eid))
+						}
 					}
 				}(externalID)
 			}
@@ -142,7 +182,9 @@ func main() {
 		go func() {
 			if err := sseClient.Run(ctx); err != nil {
 				log.Printf("SSE stopped (%v), switching to polling", err)
-				_ = tg.Send(ctx, "⚠️ SSE недоступен, переключился на REST-поллинг")
+				if tgEnabled {
+					_ = tg.Send(ctx, "⚠️ SSE недоступен, переключился на REST-поллинг")
+				}
 				if err := pollingClient.Run(ctx); err != nil {
 					log.Printf("polling stopped: %v", err)
 				}

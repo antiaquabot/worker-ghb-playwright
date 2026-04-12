@@ -25,7 +25,7 @@ type Scenario interface {
 	// Execute runs the registration scenario for objectID.
 	// smsCodeFn is called when the browser is on the SMS confirmation step —
 	// it should block until the user provides the 6-digit code.
-	Execute(ctx context.Context, objectID string, personalData config.PersonalData, smsCodeFn SMSCodeFunc) error
+	Execute(ctx context.Context, objectID string, regURL string, personalData config.PersonalData, smsCodeFn SMSCodeFunc) error
 }
 
 // SMSCodeFunc blocks until the user provides an SMS confirmation code.
@@ -52,6 +52,7 @@ func NewGHBScenario(mgr *browser.Manager) *GHBScenario {
 func (s *GHBScenario) Execute(
 	ctx context.Context,
 	objectID string,
+	regURL string,
 	pd config.PersonalData,
 	smsCodeFn SMSCodeFunc,
 ) error {
@@ -77,7 +78,7 @@ func (s *GHBScenario) Execute(
 		}
 	}()
 
-	execErr = s.runScenario(ctx, page, objectID, pd, smsCodeFn)
+	execErr = s.runScenario(ctx, page, objectID, regURL, pd, smsCodeFn)
 	return execErr
 }
 
@@ -85,10 +86,10 @@ func (s *GHBScenario) runScenario(
 	ctx context.Context,
 	page playwright.Page,
 	objectID string,
+	regURL string,
 	pd config.PersonalData,
 	smsCodeFn SMSCodeFunc,
 ) error {
-	regURL := fmt.Sprintf("%s/register/?id=%s", regBaseURL, objectID)
 	toMs := float64(navTimeout.Milliseconds())
 
 	// -----------------------------------------------------------------------
