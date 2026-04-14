@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"golang.org/x/net/http2"
 )
 
 // EventHandler is called for each received SSE event.
@@ -26,10 +24,8 @@ type Client struct {
 }
 
 func New(baseURL, developerID string, handler EventHandler) *Client {
-	transport := &http2.Transport{}
 	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   0, // no timeout for streaming
+		Timeout: 0, // no timeout for streaming
 	}
 	return &Client{
 		baseURL:     baseURL,
