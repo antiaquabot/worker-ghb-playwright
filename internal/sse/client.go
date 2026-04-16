@@ -38,6 +38,11 @@ func New(baseURL, developerID string, handler EventHandler) *Client {
 // Run connects to the SSE stream and reads events until ctx is cancelled.
 // Reconnects automatically with exponential backoff.
 // Returns non-nil error only when context is done or permanent failure occurs.
+// stableConnectionThreshold is the minimum uptime after which a dropped
+// connection is considered "stable": the backoff counter resets so the next
+// reconnect starts at 1 s instead of the accumulated maximum.
+const stableConnectionThreshold = 30 * time.Second
+
 func (c *Client) Run(ctx context.Context) error {
 	var lastEventID string
 	attempt := 0
@@ -49,22 +54,27 @@ func (c *Client) Run(ctx context.Context) error {
 		default:
 		}
 
-		if err := c.connect(ctx, &lastEventID); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			delay := backoff(attempt)
-			log.Printf("SSE connection error (attempt %d): %v — retrying in %v", attempt+1, err, delay)
-			attempt++
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-			continue
+		start := time.Now()
+		err := c.connect(ctx, &lastEventID)
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		attempt = 0
+
+		// If the connection was alive long enough, treat it as stable and
+		// reset the backoff so the next reconnect starts from 1 s.
+		if time.Since(start) >= stableConnectionThreshold {
+			attempt = 0
+		}
+
+		delay := backoff(attempt)
+		log.Printf("SSE connection error (attempt %d): %v — retrying in %v", attempt+1, err, delay)
+		attempt++
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
 	}
 }
 
@@ -96,8 +106,12 @@ func (c *Client) connect(ctx context.Context, lastEventID *string) error {
 
 	log.Printf("SSE connected to %s", url)
 
-	// Parse SSE stream
+	// Parse SSE stream.
+	// Use a 1 MiB token buffer so large JSON payloads do not trigger
+	// bufio.ErrTooLong (default is 64 KiB), which would silently drop the
+	// current event and cause an immediate reconnect.
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	var (
 		eventType string
 		eventID   string

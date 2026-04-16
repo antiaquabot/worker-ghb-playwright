@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/playwright-community/playwright-go"
 )
@@ -43,10 +44,20 @@ func (m *Manager) EnsureInstalled(ctx context.Context) error {
 }
 
 // ForceUpdate re-downloads Chromium regardless of cache state.
+// It removes all entries inside cachePath whose names start with "chromium"
+// before delegating to EnsureInstalled.
 func (m *Manager) ForceUpdate(ctx context.Context) error {
-	// Remove existing cache to force re-download
-	if err := os.RemoveAll(filepath.Join(m.cachePath, "chromium*")); err != nil {
-		log.Printf("warn: cleanup failed: %v", err)
+	entries, err := os.ReadDir(m.cachePath)
+	if err != nil && !os.IsNotExist(err) {
+		log.Printf("warn: read cache dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "chromium") {
+			p := filepath.Join(m.cachePath, e.Name())
+			if err := os.RemoveAll(p); err != nil {
+				log.Printf("warn: remove %s: %v", p, err)
+			}
+		}
 	}
 	return m.EnsureInstalled(ctx)
 }

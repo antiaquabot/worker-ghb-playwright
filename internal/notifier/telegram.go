@@ -164,9 +164,12 @@ type Update struct {
 func (n *Notifier) GetUpdates(ctx context.Context, offset int) ([]Update, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", n.botToken)
 
+	// Telegram long-poll timeout. Must be comfortably below the HTTP client
+	// Timeout (15 s) to avoid the client cancelling the request before
+	// Telegram returns; 8 s gives 7 s of headroom for network latency.
 	payload := map[string]any{
 		"offset":  offset,
-		"timeout": 10,
+		"timeout": 8,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -155,7 +155,7 @@ func InitConfig(path string) error {
 		}
 	}
 
-	fmt.Println("=== Инициализация конфигурации worker-ghb-http ===")
+	fmt.Println("=== Инициализация конфигурации worker-ghb-playwright ===")
 	fmt.Println()
 
 	// Collect service config
