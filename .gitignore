@@ -1,3 +1,6 @@
+# Worktrees
+.worktrees/
+
 # Build output
 worker-ghb-playwright
 worker-ghb-playwright.exe
@@ -12,3 +15,5 @@ config.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+.claude/*.local.json
