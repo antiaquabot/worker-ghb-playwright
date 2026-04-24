@@ -218,20 +218,34 @@ func main() {
 		}
 	}
 
-	// SSE with polling fallback
+	// SSE with polling fallback and recovery
 	if cfg.Service.UseSSE {
 		sseClient := sse.New(cfg.Service.BaseURL, DeveloperID, handler)
 		pollingClient := polling.New(cfg.Service.BaseURL, DeveloperID, cfg.Service.PollIntervalSeconds, handler)
 
+		// sseRetryInterval: how long to stay in polling before retrying SSE.
+		const sseRetryInterval = 5 * time.Minute
+
 		go func() {
-			if err := sseClient.Run(ctx); err != nil {
-				log.Printf("SSE stopped (%v), switching to polling", err)
-				if tgEnabled {
-					_ = tg.Send(ctx, "⚠️ SSE недоступен, переключился на REST-поллинг")
+			for {
+				if err := sseClient.Run(ctx); ctx.Err() != nil {
+					return
+				} else {
+					log.Printf("SSE stopped (%v), switching to polling for %v", err, sseRetryInterval)
+					if tgEnabled {
+						_ = tg.Send(ctx, "⚠️ SSE недоступен, переключился на REST-поллинг")
+					}
 				}
-				if err := pollingClient.Run(ctx); err != nil {
+
+				pollCtx, pollCancel := context.WithTimeout(ctx, sseRetryInterval)
+				if err := pollingClient.Run(pollCtx); ctx.Err() != nil {
+					pollCancel()
+					return
+				} else if err != nil {
 					log.Printf("polling stopped: %v", err)
 				}
+				pollCancel()
+				log.Printf("Retrying SSE after polling interval")
 			}
 		}()
 	} else {
