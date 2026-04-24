@@ -255,7 +255,7 @@ func InitConfig(path string) error {
 	}
 
 	fmt.Printf("\nКонфиг сохранён: %s\n", path)
-	fmt.Println("Запустите: ./worker-ghb-http --config", path)
+	fmt.Println("Запустите: ./worker-ghb-playwright --config", path)
 	return nil
 }
 
@@ -315,7 +315,7 @@ func EditConfig(path string) error {
 	}
 
 	// Write to temp file
-	tmpFile, err := os.CreateTemp("", "worker-ghb-http-*.yaml")
+	tmpFile, err := os.CreateTemp("", "worker-ghb-playwright-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
