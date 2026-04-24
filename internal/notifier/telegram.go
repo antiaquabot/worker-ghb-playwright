@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -158,6 +159,9 @@ type Update struct {
 		From struct {
 			ID int `json:"id"`
 		} `json:"from"`
+		Chat struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
 	} `json:"message"`
 }
 
@@ -206,29 +210,32 @@ func (n *Notifier) GetUpdates(ctx context.Context, offset int) ([]Update, error)
 
 func (n *Notifier) WaitForCode(ctx context.Context, messageID int) (string, error) {
 	offset := 0
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
+	configuredChatID, _ := strconv.ParseInt(n.chatID, 10, 64)
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return "", ctx.Err()
-		case <-ticker.C:
-			updates, err := n.GetUpdates(ctx, offset)
-			if err != nil {
-				log.Printf("[telegram] getUpdates error: %v", err)
+		}
+		updates, err := n.GetUpdates(ctx, offset)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			log.Printf("[telegram] getUpdates error: %v", err)
+			continue
+		}
+		for _, u := range updates {
+			offset = u.ID + 1
+			if u.Message.Chat.ID != configuredChatID {
+				log.Printf("[telegram] ignoring message from unexpected chat %d", u.Message.Chat.ID)
 				continue
 			}
-			for _, u := range updates {
-				offset = u.ID + 1
-				if u.Message.ReplyToMessage.MessageID == messageID {
-					log.Printf("[telegram] received reply to message %d: %s", messageID, u.Message.Text)
-					return strings.TrimSpace(u.Message.Text), nil
-				}
-				if u.Message.MessageID > messageID && u.Message.Text != "" {
-					log.Printf("[telegram] received message after %d (no reply): %s", messageID, u.Message.Text)
-					return strings.TrimSpace(u.Message.Text), nil
-				}
+			if u.Message.ReplyToMessage.MessageID == messageID {
+				log.Printf("[telegram] received reply to message %d: %s", messageID, u.Message.Text)
+				return strings.TrimSpace(u.Message.Text), nil
+			}
+			if u.Message.MessageID > messageID && u.Message.Text != "" {
+				log.Printf("[telegram] received message after %d (no reply): %s", messageID, u.Message.Text)
+				return strings.TrimSpace(u.Message.Text), nil
 			}
 		}
 	}
