@@ -30,7 +30,8 @@ type Client struct {
 	handler      EventHandler
 	httpClient   *http.Client
 	// previous state: externalID → registration_open
-	prevState map[string]bool
+	prevState   map[string]bool
+	fireOnFirst bool // if true, fire REGISTRATION_OPENED for already-open objects on first poll
 }
 
 func New(baseURL, developerID string, intervalSecs int, handler EventHandler) *Client {
@@ -82,7 +83,17 @@ func (c *Client) poll(ctx context.Context) {
 	for id, open := range current {
 		prev, seen := c.prevState[id]
 		if !seen {
-			// First time seeing this object — no event yet
+			if c.fireOnFirst && open {
+				data := map[string]any{"external_id": id, "developer_id": c.developerID}
+				for _, s := range statuses {
+					if s.ExternalID == id {
+						data["title"] = s.Title
+						data["registration_url"] = s.RegistrationURL
+						break
+					}
+				}
+				c.handler("REGISTRATION_OPENED", id, data)
+			}
 			continue
 		}
 		if open && !prev {
