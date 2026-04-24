@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -160,6 +161,11 @@ func main() {
 		}
 	}
 
+	var (
+		activeRegsMu sync.Mutex
+		activeRegs   = make(map[string]bool)
+	)
+
 	handler := func(eventType, externalID string, data map[string]any) {
 		if eventType != "REGISTRATION_OPENED" {
 			return
@@ -180,7 +186,21 @@ func main() {
 				}
 			}
 			if entry.AutoRegister {
+				activeRegsMu.Lock()
+				if activeRegs[externalID] {
+					activeRegsMu.Unlock()
+					log.Printf("[dedup] registration already in progress for %s, skipping", externalID)
+					break
+				}
+				activeRegs[externalID] = true
+				activeRegsMu.Unlock()
+
 				go func(eid string) {
+					defer func() {
+						activeRegsMu.Lock()
+						delete(activeRegs, eid)
+						activeRegsMu.Unlock()
+					}()
 					log.Printf("launching browser registration for object %s", eid)
 					if err := reg.Execute(ctx, eid, regURL, cfg.PersonalData, smsCodeFn); err != nil {
 						log.Printf("registration failed for %s: %v", eid, err)
@@ -193,6 +213,7 @@ func main() {
 						}
 					}
 				}(externalID)
+				break
 			}
 		}
 	}
