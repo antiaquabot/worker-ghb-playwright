@@ -253,12 +253,11 @@ func (s *GHBScenario) submitWithRetry(page playwright.Page, toMs float64) {
 			log.Printf("[ghb-scenario] wait after submit (non-fatal): %v", err)
 		}
 
-		// Brief pause for server-rendered error messages — mirrors ERROR_WAIT_TIMEOUT_MS.
-		time.Sleep(errorWaitDelay)
-
 		txt, hasErr := s.megaalertText(page)
 		if hasErr && strings.Contains(txt, tempErrorText) && time.Now().Before(deadline) {
 			log.Printf("[ghb-scenario] temporary server error %q — retrying in %s", txt, retryDelay)
+			// errorWaitDelay mirrors ERROR_WAIT_TIMEOUT_MS before the next retry attempt.
+			time.Sleep(errorWaitDelay)
 			time.Sleep(retryDelay)
 			continue
 		}
