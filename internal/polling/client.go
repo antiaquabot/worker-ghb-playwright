@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -105,8 +106,14 @@ func (c *Client) poll(ctx context.Context) {
 }
 
 func (c *Client) fetchStatuses(ctx context.Context) ([]registrationStatus, error) {
-	url := fmt.Sprintf("%s/api/v1/registration-status?developer_id=%s", c.baseURL, c.developerID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	u, err := url.Parse(c.baseURL + "/api/v1/registration-status")
+	if err != nil {
+		return nil, fmt.Errorf("parse base URL: %w", err)
+	}
+	q := u.Query()
+	q.Set("developer_id", c.developerID)
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}

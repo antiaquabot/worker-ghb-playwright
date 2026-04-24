@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -79,12 +80,17 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) connect(ctx context.Context, lastEventID *string) error {
-	url := fmt.Sprintf(
-		"%s/api/v1/events/stream?developer_id=%s&event_types=REGISTRATION_OPENED,REGISTRATION_CLOSED",
-		c.baseURL, c.developerID,
-	)
+	u, err := url.Parse(c.baseURL + "/api/v1/events/stream")
+	if err != nil {
+		return fmt.Errorf("parse base URL: %w", err)
+	}
+	q := u.Query()
+	q.Set("developer_id", c.developerID)
+	q.Set("event_types", "REGISTRATION_OPENED,REGISTRATION_CLOSED")
+	u.RawQuery = q.Encode()
+	reqURL := u.String()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -104,7 +110,7 @@ func (c *Client) connect(ctx context.Context, lastEventID *string) error {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	log.Printf("SSE connected to %s", url)
+	log.Printf("SSE connected to %s", reqURL)
 
 	// Parse SSE stream.
 	// Use a 1 MiB token buffer so large JSON payloads do not trigger
