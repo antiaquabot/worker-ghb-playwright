@@ -81,6 +81,12 @@ func (p PersonalData) PhoneDigits() string {
 	return string(digits)
 }
 
+// HasContent returns true when any personal_data field is non-empty.
+func (p PersonalData) HasContent() bool {
+	return p.FullName != "" || p.Phone != "" ||
+		p.LastName != "" || p.FirstName != "" || p.MiddleName != ""
+}
+
 type WatchEntry struct {
 	ObjectExternalID string `yaml:"object_external_id"`
 	NotifyOnOpen     bool   `yaml:"notify_on_open"`
@@ -357,7 +363,7 @@ func EditConfig(path string) error {
 	// Re-encrypt personal_data
 	var newEncryptedPD string
 	// Check if personal_data has any non-empty fields
-	if edited.PersonalData.FullName != "" || edited.PersonalData.Phone != "" {
+	if edited.PersonalData.HasContent() {
 		if password == "" {
 			pw, err := promptPassword("Введите пароль для шифрования personal_data: ")
 			if err != nil {
